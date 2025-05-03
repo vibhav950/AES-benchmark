@@ -8,6 +8,13 @@ To run the AES-NI benchmarks
 
 ```bash
 dd if=/dev/zero of=zeros.bin bs=1M count=16
-gcc aesni.c -I. -march=native
-./a.out
+gcc aesni.c -march=native -o aesni
+./aesni.exe zeros.bin out.bin
+```
+
+To run the AES-CUDA benchmarks
+
+```bash
+nvcc aes.cu -o aes_cuda
+./aes_cuda zeros.bin out.bin
 ```
