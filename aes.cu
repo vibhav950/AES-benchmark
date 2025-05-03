@@ -4,6 +4,9 @@ extern "C" {
 #include "key_schedule.c"
 }
 
+#include "test_values.h"
+#include "benchmark.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +35,7 @@ extern "C" {
   } while(0)
 
 
-__device__ __constant__ static const uint8_t SBOX[256] = {
+__device__ __constant__ uint8_t SBOX[256] = {
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b,
     0xfe, 0xd7, 0xab, 0x76, 0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0,
     0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0, 0xb7, 0xfd, 0x93, 0x26,
@@ -57,22 +60,46 @@ __device__ __constant__ static const uint8_t SBOX[256] = {
     0xb0, 0x54, 0xbb, 0x16
 };
 
+__device__ __constant__ uint8_t SBOX_INV[256] = {
+    0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e,
+    0x81, 0xf3, 0xd7, 0xfb, 0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87,
+    0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb, 0x54, 0x7b, 0x94, 0x32,
+    0xa6, 0xc2, 0x23, 0x3d, 0xee, 0x4c, 0x95, 0x0b, 0x42, 0xfa, 0xc3, 0x4e,
+    0x08, 0x2e, 0xa1, 0x66, 0x28, 0xd9, 0x24, 0xb2, 0x76, 0x5b, 0xa2, 0x49,
+    0x6d, 0x8b, 0xd1, 0x25, 0x72, 0xf8, 0xf6, 0x64, 0x86, 0x68, 0x98, 0x16,
+    0xd4, 0xa4, 0x5c, 0xcc, 0x5d, 0x65, 0xb6, 0x92, 0x6c, 0x70, 0x48, 0x50,
+    0xfd, 0xed, 0xb9, 0xda, 0x5e, 0x15, 0x46, 0x57, 0xa7, 0x8d, 0x9d, 0x84,
+    0x90, 0xd8, 0xab, 0x00, 0x8c, 0xbc, 0xd3, 0x0a, 0xf7, 0xe4, 0x58, 0x05,
+    0xb8, 0xb3, 0x45, 0x06, 0xd0, 0x2c, 0x1e, 0x8f, 0xca, 0x3f, 0x0f, 0x02,
+    0xc1, 0xaf, 0xbd, 0x03, 0x01, 0x13, 0x8a, 0x6b, 0x3a, 0x91, 0x11, 0x41,
+    0x4f, 0x67, 0xdc, 0xea, 0x97, 0xf2, 0xcf, 0xce, 0xf0, 0xb4, 0xe6, 0x73,
+    0x96, 0xac, 0x74, 0x22, 0xe7, 0xad, 0x35, 0x85, 0xe2, 0xf9, 0x37, 0xe8,
+    0x1c, 0x75, 0xdf, 0x6e, 0x47, 0xf1, 0x1a, 0x71, 0x1d, 0x29, 0xc5, 0x89,
+    0x6f, 0xb7, 0x62, 0x0e, 0xaa, 0x18, 0xbe, 0x1b, 0xfc, 0x56, 0x3e, 0x4b,
+    0xc6, 0xd2, 0x79, 0x20, 0x9a, 0xdb, 0xc0, 0xfe, 0x78, 0xcd, 0x5a, 0xf4,
+    0x1f, 0xdd, 0xa8, 0x33, 0x88, 0x07, 0xc7, 0x31, 0xb1, 0x12, 0x10, 0x59,
+    0x27, 0x80, 0xec, 0x5f, 0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d,
+    0x2d, 0xe5, 0x7a, 0x9f, 0x93, 0xc9, 0x9c, 0xef, 0xa0, 0xe0, 0x3b, 0x4d,
+    0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
+    0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63,
+    0x55, 0x21, 0x0c, 0x7d
+};
+
 __device__ __constant__ uint8_t ShiftRowsTable[16] = {
     0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11
 };
 
-__device__ __constant__ uint8_t MixColumnsTable[16] = {
-  0x02, 0x03, 0x01, 0x01,
-  0x01, 0x02, 0x03, 0x01,
-  0x01, 0x01, 0x02, 0x03,
-  0x03, 0x01, 0x01, 0x02
+__device__ __constant__ uint8_t InvShiftRowsTable[16] = {
+    0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3
 };
 
 __device__ __constant__ uint8_t KeySchedule[16 * (AES128_ROUNDS + 1)];
 
-static inline uint8_t xtime(uint8_t b) { return ((b << 1) ^ (((b >> 7) & 1) * 0x1b)); }
+__device__ __forceinline__ uint8_t xtime(uint8_t b) {
+  return (b << 1) ^ (((b >> 7) & 1) * 0x1b);
+}
 
-static inline uint8_t xtimes(uint8_t b, int n) {
+__device__ __forceinline__ uint8_t xtimes(uint8_t b, int n) {
   while (n-- > 0)
     b = xtime(b);
   return b;
@@ -81,7 +108,7 @@ static inline uint8_t xtimes(uint8_t b, int n) {
 /**
  * Multiply two polynomials in GF(2^8).
  */
-static inline uint8_t aes_mult(uint8_t a, uint8_t b) {
+__device__ __forceinline__ uint8_t aes_mult(uint8_t a, uint8_t b) {
   return ((((b >> 0) & 1) * xtimes(a, 0)) ^ (((b >> 1) & 1) * xtimes(a, 1)) ^
           (((b >> 2) & 1) * xtimes(a, 2)) ^ (((b >> 3) & 1) * xtimes(a, 3)) ^
           (((b >> 4) & 1) * xtimes(a, 4)) ^ (((b >> 5) & 1) * xtimes(a, 5)) ^
@@ -94,40 +121,88 @@ __host__ void AES_Init_Key(aes128_key_t *key) {
   CUDA_CHECK(cudaMemcpyToSymbol(KeySchedule, (uint8_t *)ks.rk, (4*(AES128_ROUNDS + 1)) * sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
 }
 
-__device__ void AddRoundKey(uint8_t state[16], int round) {
+__device__ __forceinline__ void AddRoundKey(uint8_t state[16], int round) {
   state[threadIdx.x] ^= KeySchedule[round * 16 + threadIdx.x];
 }
 
-__device__ void SubBytes(uint8_t state[16]) {
+__device__ __forceinline__ void SubBytes(uint8_t state[16]) {
   state[threadIdx.x] = SBOX[state[threadIdx.x]];
 }
 
-__device__ void ShiftRows(uint8_t instate[16], uint8_t outstate[16]) {
+__device__ __forceinline__ void InvSubBytes(uint8_t state[16]) {
+  state[threadIdx.x] = SBOX_INV[state[threadIdx.x]];
+}
+
+__device__ __forceinline__ void ShiftRows(uint8_t instate[16], uint8_t outstate[16]) {
   outstate[threadIdx.x] = instate[ShiftRowsTable[threadIdx.x]];
 }
 
-__device__ void MixColumns(uint8_t instate[16], uint8_t outstate[16]) {
-  int index = threadIdx.x;
-  int i = 4 * (index % 4);
-  int j = 4 * (index / 4);
+__device__ __forceinline__ void InvShiftRows(uint8_t instate[16], uint8_t outstate[16]) {
+  outstate[threadIdx.x] = instate[InvShiftRowsTable[threadIdx.x]];
+}
 
-  outstate[index] = 0x00;
-  while (i < 4 * (index % 4 + 1)) {
-    if (MixColumnsTable[i] == 0x01) {
-      outstate[index] ^= instate[j];
-    }
-    else if (MixColumnsTable[i] == 0x02) {
-      if (instate[j] < 0x80) outstate[index] ^= instate[j] << 1;
-      else outstate[index] ^= (instate[j] << 1) ^ 0x1B;
-    }
-    else {
-      unsigned char x;
-      if (instate[j] < 0x80) x = instate[j] << 1;
-      else x = (instate[j] << 1) ^ 0x1B;
-      outstate[index] ^= x ^ instate[j];
-    }
-    i++; j++;
+__device__ void MixColumns(uint8_t instate[16], uint8_t outstate[16]) {
+  int tid = threadIdx.x;
+  int col = tid / 4;
+  int row = tid % 4;
+  int base = 4 * col;
+
+  uint8_t s0 = instate[base + 0];
+  uint8_t s1 = instate[base + 1];
+  uint8_t s2 = instate[base + 2];
+  uint8_t s3 = instate[base + 3];
+
+  uint8_t r;
+  switch (row) {
+    case 0:
+      r = aes_mult(s0, 0x02) ^ aes_mult(s1, 0x03) ^ s2 ^ s3;
+      break;
+    case 1:
+      r = s0 ^ aes_mult(s1, 0x02) ^ aes_mult(s2, 0x03) ^ s3;
+      break;
+    case 2:
+      r = s0 ^ s1 ^ aes_mult(s2, 0x02) ^ aes_mult(s3, 0x03);
+      break;
+    case 3:
+      r = aes_mult(s0, 0x03) ^ s1 ^ s2 ^ aes_mult(s3, 0x02);
+      break;
+    default:
+      r = 0;
   }
+
+  outstate[tid] = r;
+}
+
+__device__ void InvMixColumns(uint8_t instate[16], uint8_t outstate[16]) {
+  int tid = threadIdx.x;
+  int col = tid / 4;
+  int row = tid % 4;
+  int base = 4 * col;
+
+  uint8_t a = instate[base + 0];
+  uint8_t b = instate[base + 1];
+  uint8_t c = instate[base + 2];
+  uint8_t d = instate[base + 3];
+
+  uint8_t r;
+  switch (row) {
+    case 0:
+      r = aes_mult(a, 0x0e) ^ aes_mult(b, 0x0b) ^ aes_mult(c, 0x0d) ^ aes_mult(d, 0x09);
+      break;
+    case 1:
+      r = aes_mult(a, 0x09) ^ aes_mult(b, 0x0e) ^ aes_mult(c, 0x0b) ^ aes_mult(d, 0x0d);
+      break;
+    case 2:
+      r = aes_mult(a, 0x0d) ^ aes_mult(b, 0x09) ^ aes_mult(c, 0x0e) ^ aes_mult(d, 0x0b);
+      break;
+    case 3:
+      r = aes_mult(a, 0x0b) ^ aes_mult(b, 0x0d) ^ aes_mult(c, 0x09) ^ aes_mult(d, 0x0e);
+      break;
+    default:
+      r = 0;
+  }
+
+  outstate[tid] = r;
 }
 
 /**
@@ -159,7 +234,7 @@ __global__ void AES_Encrypt(uint8_t *d_pt, uint8_t *d_ct, int num_blocks) {
     
     ShiftRows(state, temp);
     __syncthreads();
-    
+
     /* Last round does not have MixColumns */
     if (round < Nr) {
       MixColumns(temp, state);
@@ -178,27 +253,150 @@ __global__ void AES_Encrypt(uint8_t *d_pt, uint8_t *d_ct, int num_blocks) {
   d_ct[blockIdx.x * AES_BLOCK_SIZE + threadIdx.x] = state[threadIdx.x];
 }
 
-int main() {
-    aes128_key_t key;
-    uint8_t plaintext[16], ciphertext[16];
-    uint8_t *d_pt, *d_ct;
+__global__ void AES_Decrypt(uint8_t *d_ct, uint8_t *d_pt, int num_blocks) {
+  __shared__ uint8_t state[16];
+  __shared__ uint8_t temp[16];
 
-    memset(key.bytes, 0xff, sizeof(key.bytes));
-    memset(plaintext, 0x00, sizeof(plaintext));
+  if (blockIdx.x >= num_blocks)
+    return;
 
-    CUDA_CHECK(cudaMalloc((void**)&d_pt, 16));
-    CUDA_CHECK(cudaMalloc((void**)&d_ct, 16));
+  /* Each thread loads a byte */
+  state[threadIdx.x] = d_ct[blockIdx.x * AES_BLOCK_SIZE + threadIdx.x];
 
-    CUDA_CHECK(cudaMemcpy(d_pt, plaintext, 16, cudaMemcpyHostToDevice));
-    
-    AES_Init_Key(&key);
-    
-    dim3 gridsz(WINDOW_SIZE / AES_BLOCK_SIZE), blocksz(AES_BLOCK_SIZE);
-    AES_Encrypt<<<gridsz, blocksz>>>(d_pt, d_ct, 1);
+  /* Whitening step; initial AddRoundKey */
+  AddRoundKey(state, Nr);
+  __syncthreads();
 
-    CUDA_CHECK(cudaMemcpy(ciphertext, d_ct, 16, cudaMemcpyDeviceToHost));
+  /* Process all rounds */
+  for (int round = Nr - 1; round >= 0; round--) {
+    InvShiftRows(state, temp);
+    __syncthreads();
+
+    InvSubBytes(temp);
+    __syncthreads();
     
-    cudaDeviceSynchronize();
+    if (round > 0) {
+      InvMixColumns(temp, state);
+      __syncthreads();
+    } else {
+      state[threadIdx.x] = temp[threadIdx.x];
+      __syncthreads();
+    }
     
-    return 0;
+    AddRoundKey(state, round);
+    __syncthreads();
+  }
+
+  /* Each thread stores a byte */
+  d_pt[blockIdx.x * AES_BLOCK_SIZE + threadIdx.x] = state[threadIdx.x];
+}
+
+
+int main(int argc, char *argv[]) {
+  FILE *infile, *outfile;
+  long filesize;
+  aes128_key_t key;
+
+  if (argc != 3) {
+      printf("Usage: %s <infile> <outfile>\n", argv[0]);
+      return 1;
+  }
+
+  infile = fopen(argv[1], "rb");
+  if (!infile) {
+      printf("Error: Cannot open input file %s\n", argv[1]);
+      return 1;
+  }
+
+  outfile = fopen(argv[2], "wb");
+  if (!outfile) {
+      printf("Error: Cannot open output file %s\n", argv[2]);
+      fclose(infile);
+      return 1;
+  }
+
+  fseek(infile, 0, SEEK_END);
+  filesize = ftell(infile);
+  fseek(infile, 0, SEEK_SET);
+
+  if (filesize % AES_BLOCK_SIZE != 0) {
+      printf("Error: Input file size (%ld bytes) is not a multiple of AES_BLOCK_SIZE (%d bytes)\n", 
+              filesize, AES_BLOCK_SIZE);
+      fclose(infile);
+      fclose(outfile);
+      return 1;
+  }
+
+  memcpy(key.bytes, TEST_KEY, AES128_KEY_SIZE);
+  AES_Init_Key(&key);
+
+  uint8_t *h_window_in = (uint8_t*)malloc(WINDOW_SIZE);
+  uint8_t *h_window_out = (uint8_t*)malloc(WINDOW_SIZE);
+  if (!h_window_in || !h_window_out) {
+      printf("Error: Malloc fail\n");
+      free(h_window_in);
+      free(h_window_out);
+      fclose(infile);
+      fclose(outfile);
+      return 1;
+  }
+
+  uint8_t *d_pt, *d_ct;
+  CUDA_CHECK(cudaMalloc((void**)&d_pt, WINDOW_SIZE));
+  CUDA_CHECK(cudaMalloc((void**)&d_ct, WINDOW_SIZE));
+
+  dim3 blocksz(AES_BLOCK_SIZE);
+
+  /**
+   * Read the file using a sliding window technique
+   * Read MIN(WINDOW_SIZE, remaining_bytes) bytes at a time, and distribute among CUDA blocks
+   */
+  long nprocessed = 0;
+  timer_reset();
+  while (nprocessed < filesize) {
+      long ntodo = (filesize - nprocessed < WINDOW_SIZE) ? (filesize - nprocessed) : WINDOW_SIZE;
+
+      size_t nread = fread(h_window_in, 1, ntodo, infile);
+      if (nread != ntodo) {
+          printf("Error: Failed to read expected bytes from input file\n");
+          break;
+      }
+
+      int num_blocks = ntodo / AES_BLOCK_SIZE;
+
+      CUDA_CHECK(cudaMemcpy(d_pt, h_window_in, ntodo, cudaMemcpyHostToDevice));
+
+      dim3 gridsz(num_blocks);
+
+      timer_start();
+
+      AES_Encrypt<<<gridsz, blocksz>>>(d_pt, d_ct, num_blocks);
+
+      timer_pause_accumulate();
+
+      CUDA_CHECK(cudaGetLastError());
+      
+      CUDA_CHECK(cudaMemcpy(h_window_out, d_ct, ntodo, cudaMemcpyDeviceToHost));
+      
+      size_t bytes_written = fwrite(h_window_out, 1, ntodo, outfile);
+      if (bytes_written != ntodo) {
+          printf("Error: Failed to write expected bytes to output file\n");
+          break;
+      }
+      
+      nprocessed += ntodo;
+  }
+
+  CUDA_CHECK(cudaFree(d_pt));
+  CUDA_CHECK(cudaFree(d_ct));
+  free(h_window_in);
+  free(h_window_out);
+  fclose(infile);
+  fclose(outfile);
+
+  printf("================ SUMMARY ================\n");
+  printf("Processed %ld bytes, %ld blocks\n", filesize, filesize / AES_BLOCK_SIZE);
+  printf("Time taken: %lf ms\n", timer_get_accumulated());
+  
+  return 0;
 }

@@ -1,5 +1,7 @@
 #include "aes.h"
+#include "benchmark.h"
 #include "test.h"
+#include "test_values.h"
 
 #include <assert.h>
 #include <process.h>
@@ -140,6 +142,8 @@ typedef struct {
   int total_blocks;
 } ThreadData;
 
+typedef unsigned(__stdcall *thread_func_t)(void *);
+
 unsigned __stdcall encrypt_thread(void *param) {
   ThreadData *data = (ThreadData *)param;
   for (int i = data->thread_id; i < data->total_blocks;
@@ -162,16 +166,30 @@ unsigned __stdcall decrypt_thread(void *param) {
   return 0;
 }
 
-void aesni_encrypt(const char *input_file, const char *output_file,
-                   aes128_key_t *key) {
-  FILE *in = fopen(input_file, "rb");
+void aesni_do(const char *input_file, const char *output_file,
+              aes128_key_t *key, thread_func_t thread_func) {
+  FILE *in, *out;
+  aes128_ks_t ks;
+  HANDLE *threads;
+  ThreadData *thread_data;
+  long file_size;
+  int total_blocks;
+  size_t blocks_processed, blocks_to_process, bytes_to_process, bytes_read;
+
+  in = fopen(input_file, "rb");
   if (!in) {
     fprintf(stderr, "Could not open file\n");
     exit(EXIT_FAILURE);
   }
 
+  out = fopen(output_file, "wb");
+  if (!out) {
+    fprintf(stderr, "Could not open output file\n");
+    exit(EXIT_FAILURE);
+  }
+
   fseek(in, 0, SEEK_END);
-  long file_size = ftell(in);
+  file_size = ftell(in);
   fseek(in, 0, SEEK_SET);
 
   if (file_size % AES_BLOCK_SIZE != 0) {
@@ -179,148 +197,52 @@ void aesni_encrypt(const char *input_file, const char *output_file,
     exit(EXIT_FAILURE);
   }
 
-  int total_blocks = file_size / AES_BLOCK_SIZE;
-  uint8_t *input_buffer = malloc(WINDOW_SIZE);
-  uint8_t *output_buffer = malloc(WINDOW_SIZE);
-
-  if (!input_buffer || !output_buffer) {
-    fprintf(stderr, "Memory allocation failed\n");
-    exit(EXIT_FAILURE);
-  }
-
-  FILE *out = fopen(output_file, "wb");
-  if (!out) {
-    fprintf(stderr, "Could not open output file\n");
-    exit(EXIT_FAILURE);
-  }
-
-  HANDLE *threads = malloc(NUM_THREADS * sizeof(HANDLE));
-  ThreadData *thread_data = malloc(NUM_THREADS * sizeof(ThreadData));
-
-  if (!threads || !thread_data) {
-    fprintf(stderr, "Memory allocation failed\n");
-    exit(EXIT_FAILURE);
-  }
-
-  /* Process the file in chunks */
-  size_t blocks_processed = 0;
-  while (blocks_processed < total_blocks) {
-    size_t blocks_to_process =
-        (blocks_processed + BLOCKS_PER_WINDOW <= total_blocks)
-            ? BLOCKS_PER_WINDOW
-            : (total_blocks - blocks_processed);
-    size_t bytes_to_process = blocks_to_process * AES_BLOCK_SIZE;
-
-    /* Read a chunk from the input file */
-    fseek(in, blocks_processed * AES_BLOCK_SIZE, SEEK_SET);
-    size_t bytes_read = fread(input_buffer, 1, bytes_to_process, in);
-
-    if (bytes_read != bytes_to_process) {
-      fprintf(stderr, "Error reading input file\n");
-      break;
-    }
-
-    aes128_ks_t ks;
-    // aes128_encrypt_ks(key, &ks);
-
-    for (int i = 0; i < 4 * (AES128_ROUNDS + 1); i++) {
-      ks.rk[i] = 0x01020304 + i;
-    }
-
-    /* Process the chunk with multiple threads */
-    for (int i = 0; i < NUM_THREADS; i++) {
-      thread_data[i] = (ThreadData){.ks = &ks,
-                                    .input = input_buffer,
-                                    .output = output_buffer,
-                                    .thread_id = i,
-                                    .num_threads = NUM_THREADS,
-                                    .total_blocks = blocks_to_process};
-      threads[i] = (HANDLE)_beginthreadex(NULL, 0, encrypt_thread,
-                                          &thread_data[i], 0, NULL);
-    }
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-      WaitForSingleObject(threads[i], INFINITE);
-      CloseHandle(threads[i]);
-    }
-
-    /* Write the processed chunk to the output file */
-    fwrite(output_buffer, 1, bytes_to_process, out);
-
-    blocks_processed += blocks_to_process;
-  }
-
-  fclose(in);
-  fclose(out);
-
-  free(input_buffer);
-  free(output_buffer);
-  free(threads);
-  free(thread_data);
-}
-
-void aesni_decrypt(const char *input_file, const char *output_file,
-                   aes128_key_t *key) {
-  FILE *in = fopen(input_file, "rb");
-  if (!in) {
-    fprintf(stderr, "Could not open file\n");
-    exit(EXIT_FAILURE);
-  }
-
-  fseek(in, 0, SEEK_END);
-  long file_size = ftell(in);
-  fseek(in, 0, SEEK_SET);
-
-  if (file_size % AES_BLOCK_SIZE != 0) {
-    fprintf(stderr, "Input file size is not a multiple of AES block size\n");
-    exit(EXIT_FAILURE);
-  }
-
-  int total_blocks = file_size / AES_BLOCK_SIZE;
-  uint8_t *input_buffer = malloc(WINDOW_SIZE);
-  uint8_t *output_buffer = malloc(WINDOW_SIZE);
-
-  if (!input_buffer || !output_buffer) {
-    fprintf(stderr, "Memory allocation failed\n");
-    exit(EXIT_FAILURE);
-  }
-
-  FILE *out = fopen(output_file, "wb");
-  if (!out) {
-    fprintf(stderr, "Could not open output file\n");
-    exit(EXIT_FAILURE);
-  }
-
-  HANDLE *threads = malloc(NUM_THREADS * sizeof(HANDLE));
-  ThreadData *thread_data = malloc(NUM_THREADS * sizeof(ThreadData));
-
-  if (!threads || !thread_data) {
-    fprintf(stderr, "Memory allocation failed\n");
-    exit(EXIT_FAILURE);
-  }
-
-  /* Process the file in chunks */
-  size_t blocks_processed = 0;
-  while (blocks_processed < total_blocks) {
-    size_t blocks_to_process =
-        (blocks_processed + BLOCKS_PER_WINDOW <= total_blocks)
-            ? BLOCKS_PER_WINDOW
-            : (total_blocks - blocks_processed);
-    size_t bytes_to_process = blocks_to_process * AES_BLOCK_SIZE;
-
-    /* Read a chunk from the input file */
-    fseek(in, blocks_processed * AES_BLOCK_SIZE, SEEK_SET);
-    size_t bytes_read = fread(input_buffer, 1, bytes_to_process, in);
-
-    if (bytes_read != bytes_to_process) {
-      fprintf(stderr, "Error reading input file\n");
-      break;
-    }
-
-    aes128_ks_t ks;
+  /** Expand AES key */
+  if (thread_func == encrypt_thread) {
+    aes128_encrypt_ks(key, &ks);
+  } else {
     aes128_decrypt_ks(key, &ks);
+  }
+
+  total_blocks = file_size / AES_BLOCK_SIZE;
+  uint8_t *input_buffer = malloc(WINDOW_SIZE);
+  uint8_t *output_buffer = malloc(WINDOW_SIZE);
+
+  if (!input_buffer || !output_buffer) {
+    fprintf(stderr, "Malloc failed\n");
+    exit(EXIT_FAILURE);
+  }
+
+  threads = malloc(NUM_THREADS * sizeof(HANDLE));
+  thread_data = malloc(NUM_THREADS * sizeof(ThreadData));
+
+  if (!threads || !thread_data) {
+    fprintf(stderr, "Malloc failed\n");
+    exit(EXIT_FAILURE);
+  }
+
+  /* Process the file in chunks */
+  blocks_processed = 0;
+  timer_reset();
+  while (blocks_processed < total_blocks) {
+    blocks_to_process = (blocks_processed + BLOCKS_PER_WINDOW <= total_blocks)
+                            ? BLOCKS_PER_WINDOW
+                            : (total_blocks - blocks_processed);
+    bytes_to_process = blocks_to_process * AES_BLOCK_SIZE;
+
+    /* Read a chunk from the input file */
+    fseek(in, blocks_processed * AES_BLOCK_SIZE, SEEK_SET);
+    bytes_read = fread(input_buffer, 1, bytes_to_process, in);
+
+    if (bytes_read != bytes_to_process) {
+      fprintf(stderr, "Error reading input file\n");
+      break;
+    }
 
     /* Process the chunk with multiple threads */
+
+    timer_start();
+
     for (int i = 0; i < NUM_THREADS; i++) {
       thread_data[i] = (ThreadData){.ks = &ks,
                                     .input = input_buffer,
@@ -328,14 +250,16 @@ void aesni_decrypt(const char *input_file, const char *output_file,
                                     .thread_id = i,
                                     .num_threads = NUM_THREADS,
                                     .total_blocks = blocks_to_process};
-      threads[i] = (HANDLE)_beginthreadex(NULL, 0, decrypt_thread,
-                                          &thread_data[i], 0, NULL);
+      threads[i] = (HANDLE)_beginthreadex(NULL, 0, thread_func, &thread_data[i],
+                                          0, NULL);
     }
 
     for (int i = 0; i < NUM_THREADS; i++) {
       WaitForSingleObject(threads[i], INFINITE);
       CloseHandle(threads[i]);
     }
+
+    timer_pause_accumulate();
 
     /* Write the processed chunk to the output file */
     fwrite(output_buffer, 1, bytes_to_process, out);
@@ -350,14 +274,23 @@ void aesni_decrypt(const char *input_file, const char *output_file,
   free(output_buffer);
   free(threads);
   free(thread_data);
+
+  printf("================ SUMMARY ================\n");
+  printf("Processed %ld bytes, %ld blocks\n", file_size, file_size / AES_BLOCK_SIZE);
+  printf("Time taken: %lf ms\n", timer_get_accumulated());
 }
 
-int main() {
+int main(int argc, char *argv[]) {
   aes128_key_t key;
 
-  memset(key.bytes, 0xff, AES128_KEY_SIZE);
+  memcpy(key.bytes, TEST_KEY, AES128_KEY_SIZE);
 
-  aesni_encrypt("zeros.bin", "out2.txt", &key);
+  if (argc != 3) {
+    fprintf(stderr, "Usage: %s <input_file> <output_file>", argv[0]);
+    return 1;
+  }
+
+  aesni_do(argv[1], argv[2], &key, encrypt_thread);
 
   return 0;
 }
