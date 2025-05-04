@@ -14,7 +14,8 @@ extern "C" {
 
 #include <cuda.h>
 
-#define WINDOW_SIZE (32 * AES_BLOCK_SIZE)
+// #define WINDOW_SIZE (32 * AES_BLOCK_SIZE)
+#define BLOCKS_PER_SM (32) /*set this according to the CUDA compute capability spec*/
 
 #define CUDA_CHECK(stmt)                                                       \
   do {                                                                         \
@@ -28,9 +29,8 @@ extern "C" {
 #define PRINT_ARRAY(arr, len)                                                  \
   do {                                                                         \
     uint8_t *p8 = (uint8_t *)arr;                                              \
-    for (int i = 0; i < len; i++) {                                            \
+    for (int i = 0; i < len; i++)                                              \
       printf("%02x ", p8[i]);                                                  \
-    }                                                                          \
     printf("\n");                                                              \
   } while(0)
 
@@ -291,11 +291,13 @@ __global__ void AES_Decrypt(uint8_t *d_ct, uint8_t *d_pt, int num_blocks) {
   d_pt[blockIdx.x * AES_BLOCK_SIZE + threadIdx.x] = state[threadIdx.x];
 }
 
-
 int main(int argc, char *argv[]) {
   FILE *infile, *outfile;
   long filesize;
   aes128_key_t key;
+  int deviceId, numSM;
+  char *deviceName;
+  int windowSize;
 
   if (argc != 3) {
       printf("Usage: %s <infile> <outfile>\n", argv[0]);
@@ -330,8 +332,16 @@ int main(int argc, char *argv[]) {
   memcpy(key.bytes, TEST_KEY, AES128_KEY_SIZE);
   AES_Init_Key(&key);
 
-  uint8_t *h_window_in = (uint8_t*)malloc(WINDOW_SIZE);
-  uint8_t *h_window_out = (uint8_t*)malloc(WINDOW_SIZE);
+  deviceId = 0;
+  cudaDeviceProp deviceProp;
+  CUDA_CHECK(cudaGetDevice(&deviceId));
+  CUDA_CHECK(cudaGetDeviceProperties(&deviceProp, deviceId));
+  deviceName = deviceProp.name;
+  numSM = deviceProp.multiProcessorCount;
+  windowSize = BLOCKS_PER_SM * numSM * AES_BLOCK_SIZE;
+
+  uint8_t *h_window_in = (uint8_t*)malloc(windowSize);
+  uint8_t *h_window_out = (uint8_t*)malloc(windowSize);
   if (!h_window_in || !h_window_out) {
       printf("Error: Malloc fail\n");
       free(h_window_in);
@@ -342,19 +352,19 @@ int main(int argc, char *argv[]) {
   }
 
   uint8_t *d_pt, *d_ct;
-  CUDA_CHECK(cudaMalloc((void**)&d_pt, WINDOW_SIZE));
-  CUDA_CHECK(cudaMalloc((void**)&d_ct, WINDOW_SIZE));
+  CUDA_CHECK(cudaMalloc((void**)&d_pt, windowSize));
+  CUDA_CHECK(cudaMalloc((void**)&d_ct, windowSize));
 
   dim3 blocksz(AES_BLOCK_SIZE);
 
   /**
    * Read the file using a sliding window technique
-   * Read MIN(WINDOW_SIZE, remaining_bytes) bytes at a time, and distribute among CUDA blocks
+   * Read MIN(windowSize, remaining_bytes) bytes at a time, and distribute among CUDA blocks
    */
   long nprocessed = 0;
   timer_reset();
   while (nprocessed < filesize) {
-      long ntodo = (filesize - nprocessed < WINDOW_SIZE) ? (filesize - nprocessed) : WINDOW_SIZE;
+      long ntodo = (filesize - nprocessed < windowSize) ? (filesize - nprocessed) : windowSize;
 
       size_t nread = fread(h_window_in, 1, ntodo, infile);
       if (nread != ntodo) {
@@ -362,15 +372,15 @@ int main(int argc, char *argv[]) {
           break;
       }
 
-      int num_blocks = ntodo / AES_BLOCK_SIZE;
+      int nblocks = ntodo / AES_BLOCK_SIZE;
 
       CUDA_CHECK(cudaMemcpy(d_pt, h_window_in, ntodo, cudaMemcpyHostToDevice));
 
-      dim3 gridsz(num_blocks);
+      dim3 gridsz(nblocks);
 
       timer_start();
 
-      AES_Encrypt<<<gridsz, blocksz>>>(d_pt, d_ct, num_blocks);
+      AES_Encrypt<<<gridsz, blocksz>>>(d_pt, d_ct, nblocks);
 
       timer_pause_accumulate();
 
@@ -394,9 +404,13 @@ int main(int argc, char *argv[]) {
   fclose(infile);
   fclose(outfile);
 
+  printf("\x1B[36m");
   printf("================ SUMMARY ================\n");
   printf("Processed %ld bytes, %ld blocks\n", filesize, filesize / AES_BLOCK_SIZE);
   printf("Time taken: %lf ms\n", timer_get_accumulated());
+  printf("CUDA device: %s\n", deviceName);
+  printf("Max blocks: %d\n", windowSize / AES_BLOCK_SIZE);
+  printf("\x1B[0m");
   
   return 0;
 }

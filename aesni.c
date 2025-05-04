@@ -1,5 +1,5 @@
 #include "aes.h"
-#include "benchmark.h"
+#include "benchmark.h" // #include <Windows.h>
 #include "test.h"
 #include "test_values.h"
 
@@ -9,7 +9,35 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
+
+int get_processor_count(void) {
+  SYSTEM_LOGICAL_PROCESSOR_INFORMATION *info = NULL;
+  DWORD length = 0;
+  int physical_cores = 0;
+
+  GetLogicalProcessorInformation(NULL, &length);
+  info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION *)malloc(length);
+  if (!info) {
+    fprintf(stderr, "Memory allocation failed\n");
+    exit(EXIT_FAILURE);
+  }
+
+  if (!GetLogicalProcessorInformation(info, &length)) {
+    fprintf(stderr, "GetLogicalProcessorInformation failed\n");
+    free(info);
+    exit(EXIT_FAILURE);
+  }
+
+  DWORD count = length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+  for (DWORD i = 0; i < count; ++i) {
+    if (info[i].Relationship == RelationProcessorCore) {
+      physical_cores++;
+    }
+  }
+
+  free(info);
+  return physical_cores;
+}
 
 static inline __m128i __attribute__((always_inline))
 KEY_128_ASSIST(__m128i temp1, __m128i temp2) {
@@ -131,7 +159,6 @@ void aesni_block_decr(uint8_t *in, uint8_t *out, const aes128_ks_t *ks) {
 
 #define WINDOW_SIZE 1024 * 1024 /* 1 MB sliding window buffer */
 #define BLOCKS_PER_WINDOW (WINDOW_SIZE / AES_BLOCK_SIZE)
-#define NUM_THREADS 12
 
 typedef struct {
   aes128_ks_t *ks;
@@ -167,7 +194,7 @@ unsigned __stdcall decrypt_thread(void *param) {
 }
 
 void aesni_do(const char *input_file, const char *output_file,
-              aes128_key_t *key, thread_func_t thread_func) {
+              aes128_key_t *key, int num_threads, thread_func_t thread_func) {
   FILE *in, *out;
   aes128_ks_t ks;
   HANDLE *threads;
@@ -213,8 +240,8 @@ void aesni_do(const char *input_file, const char *output_file,
     exit(EXIT_FAILURE);
   }
 
-  threads = malloc(NUM_THREADS * sizeof(HANDLE));
-  thread_data = malloc(NUM_THREADS * sizeof(ThreadData));
+  threads = malloc(num_threads * sizeof(HANDLE));
+  thread_data = malloc(num_threads * sizeof(ThreadData));
 
   if (!threads || !thread_data) {
     fprintf(stderr, "Malloc failed\n");
@@ -243,18 +270,18 @@ void aesni_do(const char *input_file, const char *output_file,
 
     timer_start();
 
-    for (int i = 0; i < NUM_THREADS; i++) {
+    for (int i = 0; i < num_threads; i++) {
       thread_data[i] = (ThreadData){.ks = &ks,
                                     .input = input_buffer,
                                     .output = output_buffer,
                                     .thread_id = i,
-                                    .num_threads = NUM_THREADS,
+                                    .num_threads = num_threads,
                                     .total_blocks = blocks_to_process};
       threads[i] = (HANDLE)_beginthreadex(NULL, 0, thread_func, &thread_data[i],
                                           0, NULL);
     }
 
-    for (int i = 0; i < NUM_THREADS; i++) {
+    for (int i = 0; i < num_threads; i++) {
       WaitForSingleObject(threads[i], INFINITE);
       CloseHandle(threads[i]);
     }
@@ -275,9 +302,13 @@ void aesni_do(const char *input_file, const char *output_file,
   free(threads);
   free(thread_data);
 
+  printf("\x1B[36m");
   printf("================ SUMMARY ================\n");
-  printf("Processed %ld bytes, %ld blocks\n", file_size, file_size / AES_BLOCK_SIZE);
+  printf("Processed %ld bytes, %ld blocks\n", file_size,
+         file_size / AES_BLOCK_SIZE);
   printf("Time taken: %lf ms\n", timer_get_accumulated());
+  printf("Number of cores: %d\n", num_threads);
+  printf("\x1B[0m");
 }
 
 int main(int argc, char *argv[]) {
@@ -290,7 +321,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  aesni_do(argv[1], argv[2], &key, encrypt_thread);
+  aesni_do(argv[1], argv[2], &key, get_processor_count(), encrypt_thread);
 
   return 0;
 }
