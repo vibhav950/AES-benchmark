@@ -316,12 +316,19 @@ int main(int argc, char *argv[]) {
 
   memcpy(key.bytes, TEST_KEY, AES128_KEY_SIZE);
 
-  if (argc != 3) {
-    fprintf(stderr, "Usage: %s <input_file> <output_file>", argv[0]);
+  if (argc != 4) {
+    fprintf(stderr, "Usage: %s [encrypt/decrypt] <input_file> <output_file>", argv[0]);
     return 1;
   }
 
-  aesni_do(argv[1], argv[2], &key, get_processor_count(), encrypt_thread);
+  if (strcmp(argv[1], "encrypt") == 0) {
+    aesni_do(argv[2], argv[3], &key, get_processor_count(), encrypt_thread);
+  } else if (strcmp(argv[1], "decrypt") == 0) {
+    aesni_do(argv[2], argv[3], &key, get_processor_count(), decrypt_thread);
+  } else {
+    fprintf(stderr, "Invalid operation: %s\n", argv[1]);
+    return 1;
+  }
 
   return 0;
 }
