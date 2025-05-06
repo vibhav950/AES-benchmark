@@ -368,13 +368,13 @@ int main(int argc, char *argv[]) {
 
       dim3 gridsz(nblocks);
 
-      if (is_encrypt) {
-        timer_start();
+      timer_start();
+
+      if (is_encrypt)
         AES_Encrypt<<<gridsz, blocksz>>>(d_in, d_out, nblocks);
-      } else {
-        timer_start();
+      else
         AES_Decrypt<<<gridsz, blocksz>>>(d_in, d_out, nblocks);
-      }
+
       timer_pause_accumulate();
 
       CUDA_CHECK(cudaGetLastError());
