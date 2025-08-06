@@ -64,3 +64,5 @@ Time taken: 2.292581 ms
 CUDA device: NVIDIA GeForce GTX 1650
 Max blocks: 448
 ```
+
+![benchmark](https://github.com/user-attachments/assets/491c8bdc-0785-4243-ae3e-aef80f679a71)
